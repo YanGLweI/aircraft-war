@@ -1,0 +1,96 @@
+// 敌机：类型化、独立血条、移动 AI、可射击。通过物理组做对象池复用。
+import Phaser from 'phaser';
+import { DEPTH } from '../config/gameConfig.js';
+import { ENEMY_TYPES } from '../config/balance.js';
+import HealthBar from '../ui/HealthBar.js';
+
+export default class Enemy extends Phaser.Physics.Arcade.Sprite {
+  constructor(scene, x, y) {
+    super(scene, x, y, '__white');
+    this.enemyType = 'dart';
+    this.hpBar = new HealthBar(scene, { width: 40, height: 4, fillColor: 0x36e07a, depth: DEPTH.ENEMY + 1 });
+    this.hpBar.setVisible(false);
+  }
+
+  spawn(x, y, type, themeKey, mods = {}) {
+    const cfg = ENEMY_TYPES[type];
+    this.enemyType = type;
+    this.cfg = cfg;
+    this.enableBody(true, x, y, true, true);
+    this.setActive(true).setVisible(true);
+    this.setTexture(`${themeKey}_enemy_${type}`);
+    this.setDepth(DEPTH.ENEMY);
+    this.clearTint();
+    this.setAlpha(1);
+
+    this.maxHp = Math.round(cfg.hp * (mods.hpMul || 1));
+    this.hp = this.maxHp;
+    this.speed = cfg.speed * (mods.speedMul || 1);
+    this.score = cfg.score;
+    this.moveKind = cfg.move;
+    this.canShoot = cfg.canShoot;
+    this.fireInterval = cfg.fireInterval || 1500;
+    this.nextFire = this.scene.time.now + Phaser.Math.Between(400, this.fireInterval);
+    this.moveTime = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    this.baseVX = 0;
+
+    const disp = cfg.size;
+    this.setDisplaySize(disp, disp);
+    if (this.body) {
+      this.body.setSize(this.width * 0.7, this.height * 0.7, true);
+    }
+    this.setVelocity(0, this.speed);
+    this.hpBar.setVisible(true);
+    return this;
+  }
+
+  takeDamage(amount) {
+    this.hp -= amount;
+    // 受击闪白
+    this.setTintFill(0xffffff);
+    this.scene.time.delayedCall(60, () => {
+      if (this.active) this.clearTint();
+    });
+    return this.hp <= 0;
+  }
+
+  deactivate() {
+    this.hpBar.setVisible(false);
+    this.disableBody(true, true);
+    this.setActive(false).setVisible(false);
+  }
+
+  preUpdate(time, delta) {
+    super.preUpdate(time, delta);
+    if (!this.active) return;
+    this.moveTime += delta / 1000;
+
+    // 移动模式
+    if (this.moveKind === 'weave') {
+      this.setVelocityX(Math.cos(this.moveTime * 2) * this.speed * 0.8);
+      this.setVelocityY(this.speed * 0.7);
+    } else if (this.moveKind === 'dive') {
+      this.setVelocityY(this.speed);
+    } else {
+      this.setVelocityY(this.speed);
+    }
+
+    // 射击
+    if (this.canShoot && time > this.nextFire && this.y < this.scene.scale.height * 0.7) {
+      this.nextFire = time + this.fireInterval;
+      if (this.scene.enemyShoot) this.scene.enemyShoot(this);
+    }
+
+    // 血条跟随
+    const dispH = this.displayHeight;
+    this.hpBar.draw(this.x - 20, this.y - dispH / 2 - 8, this.hp / this.maxHp);
+
+    // 出界回收（底部离场）
+    if (this.y > this.scene.scale.height + 60) this.deactivate();
+  }
+
+  destroy(fromScene) {
+    if (this.hpBar) this.hpBar.destroy();
+    super.destroy(fromScene);
+  }
+}
