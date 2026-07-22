@@ -1,4 +1,4 @@
-// 计分系统：击杀得分 + 连击倍率 + 生存加成。
+// 计分系统：仅击杀敌机得分 + 连击倍率。
 import { SCORE } from '../config/balance.js';
 
 export default class ScoreSystem {
@@ -7,7 +7,6 @@ export default class ScoreSystem {
     this.combo = 0; // 连击次数
     this.multiplier = 1;
     this.lastKillAt = -99999;
-    this._survivalAcc = 0;
   }
 
   // 击杀敌机
@@ -27,14 +26,8 @@ export default class ScoreSystem {
     this.score += Math.round(points);
   }
 
-  // 每帧调用累计生存分，并处理连击过期
+  // 每帧调用：仅处理连击过期（不再累加生存分）
   update(deltaMs, now) {
-    this._survivalAcc += (SCORE.survivalPerSec * deltaMs) / 1000;
-    if (this._survivalAcc >= 1) {
-      const whole = Math.floor(this._survivalAcc);
-      this.score += whole;
-      this._survivalAcc -= whole;
-    }
     if (this.combo > 0 && now - this.lastKillAt > SCORE.comboWindowMs) {
       this.combo = 0;
       this.multiplier = 1;

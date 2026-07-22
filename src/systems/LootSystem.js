@@ -20,11 +20,13 @@ export default class LootSystem {
     return entries[0][0];
   }
 
-  // 敌机被击败时调用，按概率掉落
-  maybeDrop(x, y, isElite = false) {
-    const chance = isElite ? LOOT.eliteDropChance : LOOT.dropChance;
+  // 敌机被击败时调用，按敌机类型的 dropChance 概率掉落
+  maybeDrop(enemy) {
+    const chance = (enemy && enemy.cfg && enemy.cfg.dropChance != null)
+      ? enemy.cfg.dropChance
+      : LOOT.dropChance;
     if (Math.random() > chance) return;
-    this.drop(x, y, this._rollType());
+    this.drop(enemy.x, enemy.y, this._rollType());
   }
 
   // 指定掉落（Boss 掉多个）

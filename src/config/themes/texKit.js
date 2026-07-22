@@ -1,6 +1,7 @@
 // 程序化纹理生成工具：根据主题的 style + palette 生成全部游戏纹理。
 // 三种风格：'neon'(赛博霓虹) | 'pixel'(像素复古) | 'metal'(写实太空)。
 // 生成的纹理统一以 `${theme.key}_xxx` 命名，实体按当前主题取用。
+import { ENEMY_TYPES } from '../balance.js';
 
 // 飞船轮廓（归一化 0..1 坐标，x 向右、y 向下）。玩家机头朝上，敌机机头朝下。
 const POLY = {
@@ -77,6 +78,46 @@ const POLY = {
     [1.0, 0.4],
     [0.88, 0.62],
     [0.7, 0.9]
+  ],
+  // 环形弹旋转体：菱形主体 + 侧翼尖刺
+  spinner: [
+    [0.5, 1.0],
+    [0.24, 0.74],
+    [0.02, 0.62],
+    [0.22, 0.5],
+    [0.08, 0.28],
+    [0.5, 0.0],
+    [0.92, 0.28],
+    [0.78, 0.5],
+    [0.98, 0.62],
+    [0.76, 0.74]
+  ],
+  // 坦克：宽厚重甲
+  tank: [
+    [0.5, 1.0],
+    [0.14, 0.86],
+    [0.06, 0.58],
+    [0.16, 0.5],
+    [0.1, 0.22],
+    [0.34, 0.28],
+    [0.5, 0.08],
+    [0.66, 0.28],
+    [0.9, 0.22],
+    [0.84, 0.5],
+    [0.94, 0.58],
+    [0.86, 0.86]
+  ],
+  // 急折线兵：细长带侧刺
+  zigzag: [
+    [0.5, 1.0],
+    [0.3, 0.64],
+    [0.06, 0.66],
+    [0.36, 0.42],
+    [0.42, 0.06],
+    [0.58, 0.06],
+    [0.64, 0.42],
+    [0.94, 0.66],
+    [0.7, 0.64]
   ]
 };
 
@@ -278,8 +319,10 @@ export function generateThemeTextures(scene, theme) {
   if (scene.textures.exists(`${k}_player`)) return; // 避免重复生成
 
   genShip(scene, `${k}_player`, 56, POLY.player, st, p.player);
-  ['dart', 'weaver', 'diver', 'elite'].forEach((t) => {
-    genShip(scene, `${k}_enemy_${t}`, 52, POLY[t], st, p.enemy);
+  // 遍历所有敌机类型，按各自 shape 生成纹理
+  Object.entries(ENEMY_TYPES).forEach(([type, cfg]) => {
+    const poly = POLY[cfg.shape] || POLY.dart;
+    genShip(scene, `${k}_enemy_${type}`, 52, poly, st, p.enemy);
   });
   genShip(scene, `${k}_boss`, 150, POLY.boss, st, p.boss);
 

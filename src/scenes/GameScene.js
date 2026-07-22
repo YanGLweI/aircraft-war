@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { SCENES, REG, EV, DEPTH, GAME_WIDTH as W, GAME_HEIGHT as H } from '../config/gameConfig.js';
 import { getTheme } from '../config/themes/index.js';
 import { createBackground } from '../config/themes/background.js';
-import { PLAYER, LOOT, BOSS, ENEMY_TYPES } from '../config/balance.js';
+import { PLAYER, LOOT, BOSS } from '../config/balance.js';
 import Player from '../entities/Player.js';
 import Enemy from '../entities/Enemy.js';
 import Boss from '../entities/Boss.js';
@@ -116,17 +116,66 @@ export default class GameScene extends Phaser.Scene {
 
   // ---------- 敌方射击 ----------
   enemyShoot(enemy) {
-    const b = this.enemyBullets.get(enemy.x, enemy.y);
-    if (!b) return;
     const p = this.player;
-    const ang = p && p.alive ? Phaser.Math.Angle.Between(enemy.x, enemy.y, p.x, p.y) : Math.PI / 2;
-    const sp = 240;
-    b.fire(enemy.x, enemy.y + 10, Math.cos(ang) * sp, Math.sin(ang) * sp, {
+    const aim = p && p.alive
+      ? Phaser.Math.Angle.Between(enemy.x, enemy.y, p.x, p.y)
+      : Math.PI / 2;
+    const sp = enemy.cfg.bulletSpeed || 240;
+    const x = enemy.x;
+    const y = enemy.y + 10;
+    switch (enemy.attack) {
+      case 'spread': {
+        // 以矄准角为中心的 3 发扇形（±18°）
+        const d = Phaser.Math.DegToRad(18);
+        this._fireEnemyBullet(x, y, aim - d, sp);
+        this._fireEnemyBullet(x, y, aim, sp);
+        this._fireEnemyBullet(x, y, aim + d, sp);
+        break;
+      }
+      case 'radial': {
+        // 8 发 360° 环形
+        for (let i = 0; i < 8; i++) {
+          this._fireEnemyBullet(x, y, (Math.PI * 2 * i) / 8, sp);
+        }
+        break;
+      }
+      case 'dual': {
+        // 两发平行下落（左右偏移）
+        const down = Math.PI / 2;
+        this._fireEnemyBullet(x - 12, y, down, sp);
+        this._fireEnemyBullet(x + 12, y, down, sp);
+        break;
+      }
+      case 'burst': {
+        // 连发 3 发矄准弹（间隔 ~120ms）
+        for (let i = 0; i < 3; i++) {
+          this.time.delayedCall(i * 120, () => {
+            if (!enemy.active) return;
+            const a = p && p.alive
+              ? Phaser.Math.Angle.Between(enemy.x, enemy.y, p.x, p.y)
+              : Math.PI / 2;
+            this._fireEnemyBullet(enemy.x, enemy.y + 10, a, sp);
+          });
+        }
+        break;
+      }
+      case 'aimed':
+      default:
+        this._fireEnemyBullet(x, y, aim, sp);
+        break;
+    }
+    if (this.audio) this.audio.enemyShoot();
+  }
+
+  // 发射一发敌机子弹（按角度/速度）
+  _fireEnemyBullet(x, y, angle, speed) {
+    const b = this.enemyBullets.get(x, y);
+    if (!b) return;
+    b.fire(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, {
       texture: `${this.theme.key}_ebullet`,
       damage: DMG.enemyBullet,
       isEnemy: true
     });
-    if (this.audio) this.audio.enemyShoot();
   }
 
   spawnBossBullet(x, y, vx, vy) {
@@ -213,11 +262,11 @@ export default class GameScene extends Phaser.Scene {
   }
 
   killEnemy(enemy) {
-    const isElite = enemy.enemyType === 'elite';
+    const sizeScale = Phaser.Math.Clamp((enemy.cfg.size || 40) / 40, 0.8, 1.8);
     this.score.addKill(enemy.score, this.time.now);
-    this.explode(enemy.x, enemy.y, this.theme.palette.enemy.glow, isElite ? 1.6 : 1);
+    this.explode(enemy.x, enemy.y, this.theme.palette.enemy.glow, sizeScale);
     if (this.audio) this.audio.explosion();
-    this.loot.maybeDrop(enemy.x, enemy.y, isElite);
+    this.loot.maybeDrop(enemy);
     enemy.deactivate();
   }
 
@@ -266,13 +315,13 @@ export default class GameScene extends Phaser.Scene {
     let label = '';
     if (type === 'upgrade') {
       const ok = this.player.levelUp();
-      label = ok ? '飞机升级！' : '火力已满 +分';
-      if (!ok) this.score.addRaw(300);
+      label = ok ? '飞机升级！' : '火力已满 +血';
+      if (!ok) this.player.heal(15);
       else if (this.audio) this.audio.levelUp();
     } else if (type === 'weapon') {
       const ok = this.player.levelUp();
-      label = ok ? '强化炮弹！' : '火力已满 +分';
-      if (!ok) this.score.addRaw(300);
+      label = ok ? '强化炮弹！' : '火力已满 +血';
+      if (!ok) this.player.heal(15);
     } else if (type === 'heal') {
       this.player.heal(LOOT.healAmount);
       label = `回血 +${LOOT.healAmount}`;

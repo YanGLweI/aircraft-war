@@ -19,35 +19,56 @@ export const WEAPON_LEVELS = [
 export const MAX_LEVEL = WEAPON_LEVELS.length;
 
 // 敌机类型定义
+// shape: 引用 texKit 的 POLY 造型；tint: 同造型间的辨识色（可选）；
+// move: straight|weave|dive|zigzag|descendStop；attack: none|aimed|spread|radial|dual|burst
 export const ENEMY_TYPES = {
-  dart: { hp: 20, speed: 150, score: 100, size: 34, move: 'straight', canShoot: false, color: 0xff5577 },
-  weaver: { hp: 30, speed: 120, score: 150, size: 38, move: 'weave', canShoot: true, fireInterval: 1800, color: 0xffaa33 },
-  diver: { hp: 26, speed: 210, score: 180, size: 36, move: 'dive', canShoot: false, color: 0x66ddff },
-  elite: { hp: 90, speed: 90, score: 400, size: 52, move: 'weave', canShoot: true, fireInterval: 1200, color: 0xcc66ff }
+  // 直冲小兵：血极低、无攻击、掉落极少
+  scout: { shape: 'dart', hp: 10, speed: 180, score: 80, size: 30, move: 'straight', attack: 'none', dropChance: 0.06, tint: 0xffd1e0 },
+  // 轻微摆动小兵
+  dart: { shape: 'dart', hp: 16, speed: 150, score: 100, size: 34, move: 'weave', attack: 'none', dropChance: 0.10 },
+  // 高速俯冲兵
+  diver: { shape: 'diver', hp: 20, speed: 235, score: 150, size: 36, move: 'dive', attack: 'none', dropChance: 0.12, tint: 0x9be7ff },
+  // 急折线兵
+  zigzag: { shape: 'zigzag', hp: 24, speed: 150, score: 160, size: 36, move: 'zigzag', attack: 'none', dropChance: 0.12, tint: 0xffe08a },
+  // 下降悬停 + 瞄准射击
+  gunner: { shape: 'weaver', hp: 30, speed: 130, score: 180, size: 40, move: 'descendStop', attack: 'aimed', fireInterval: 1500, bulletSpeed: 250, dropChance: 0.18 },
+  // 摆动 + 扇形弹
+  spreader: { shape: 'weaver', hp: 42, speed: 100, score: 240, size: 44, move: 'weave', attack: 'spread', fireInterval: 2000, bulletSpeed: 220, dropChance: 0.24, tint: 0xffb3d1 },
+  // 悬停 + 环形弹
+  spinner: { shape: 'spinner', hp: 58, speed: 90, score: 320, size: 48, move: 'descendStop', attack: 'radial', fireInterval: 2300, bulletSpeed: 180, dropChance: 0.30, tint: 0xd9b3ff },
+  // 高血慢速坦克 + 双直弹
+  tank: { shape: 'tank', hp: 130, speed: 62, score: 400, size: 58, move: 'straight', attack: 'dual', fireInterval: 2400, bulletSpeed: 210, dropChance: 0.38, tint: 0xbfe0ff },
+  // 精英兵 + 爆发弹
+  elite: { shape: 'elite', hp: 100, speed: 90, score: 460, size: 54, move: 'weave', attack: 'burst', fireInterval: 1600, bulletSpeed: 260, dropChance: 0.6 }
 };
 
-// 随难度解锁的敌种（难度等级 -> 可用类型）
+// 随难度解锁的敌种（难度等级 -> 可用类型），低难度只有基础小兵
 export function enemyPoolForDifficulty(d) {
-  const pool = ['dart'];
-  if (d >= 2) pool.push('weaver');
+  const pool = ['scout'];
+  if (d >= 2) pool.push('dart');
   if (d >= 3) pool.push('diver');
-  if (d >= 5) pool.push('elite');
+  if (d >= 4) pool.push('zigzag');
+  if (d >= 5) pool.push('gunner');
+  if (d >= 6) pool.push('spreader');
+  if (d >= 8) pool.push('spinner');
+  if (d >= 9) pool.push('tank');
+  if (d >= 10) pool.push('elite');
   return pool;
 }
 
 // 难度曲线：由 存活时间(秒) 与 得分 共同推导难度等级 (1..∞)
 export function computeDifficulty(elapsedSec, score) {
-  const byTime = elapsedSec / 25; // 每 25 秒 +1
+  const byTime = elapsedSec / 20; // 每 20 秒 +1
   const byScore = score / 4000; // 每 4000 分 +1
   return 1 + byTime + byScore;
 }
 
-// 难度等级 -> 具体刷怪参数
+// 难度等级 -> 具体刷怪参数（血量/速度倍率有上限，避免失控）
 export function spawnParamsForDifficulty(d) {
   return {
     interval: Math.max(320, 1200 - d * 70), // 刷新间隔(ms)，越来越快
-    hpMul: 1 + d * 0.14, // 敌机血量倍率
-    speedMul: 1 + d * 0.05, // 敌机速度倍率
+    hpMul: Math.min(2.2, 1 + d * 0.1), // 敌机血量倍率（封顶 2.2x）
+    speedMul: Math.min(1.6, 1 + d * 0.04), // 敌机速度倍率（封顶 1.6x）
     batchMax: Math.min(4, 1 + Math.floor(d / 3)) // 一次最多刷几只
   };
 }
@@ -65,8 +86,7 @@ export const BOSS = {
 
 // 道具掉落
 export const LOOT = {
-  dropChance: 0.22, // 普通敌机掉落概率
-  eliteDropChance: 0.6, // 精英必给更好
+  dropChance: 0.16, // 默认回退概率（敌机类型未指定时）
   // 权重（会做归一化）
   weights: { upgrade: 12, weapon: 18, heal: 22, shield: 16 },
   healAmount: 30,
@@ -75,10 +95,10 @@ export const LOOT = {
   fallSpeed: 120
 };
 
-// 计分
+// 计分（仅击落敌机得分：生存分为 0）
 export const SCORE = {
   comboWindowMs: 2500, // 连击窗口
   comboStep: 0.1, // 每次连击 +0.1 倍率
   comboMax: 5, // 最高 5x
-  survivalPerSec: 5 // 每秒生存分
+  survivalPerSec: 0 // 不再给被动生存分
 };
