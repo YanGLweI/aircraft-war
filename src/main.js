@@ -32,7 +32,29 @@ const config = {
 
 const game = new Phaser.Game(config);
 
-// 开发环境调试钩子（便于自动化验证）
+// 输入坐标同步：窗口/布局变化时完整重算缩放与居中
+const refreshScale = () => game.scale.refresh();
+window.addEventListener('load', refreshScale);
+window.addEventListener('resize', refreshScale);
+window.addEventListener('orientationchange', () => setTimeout(refreshScale, 100));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(refreshScale, 100); });
+// 输入坐标防御：实时从 getBoundingClientRect 计算世界坐标，避免 canvasBounds 缓存过期
+game.events.once('ready', () => {
+  const canvas = game.canvas;
+  const baseW = game.scale.baseSize.width;   // 480
+  const baseH = game.scale.baseSize.height;  // 800
+
+  game.scale.transformX = function (pageX) {
+    const rect = canvas.getBoundingClientRect();
+    return (pageX - (window.pageXOffset || 0) - rect.left) * (baseW / rect.width);
+  };
+  game.scale.transformY = function (pageY) {
+    const rect = canvas.getBoundingClientRect();
+    return (pageY - (window.pageYOffset || 0) - rect.top) * (baseH / rect.height);
+  };
+});
+
+// 开发环境调试钩子
 if (import.meta.env && import.meta.env.DEV) {
   window.__game = game;
 }

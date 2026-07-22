@@ -50,12 +50,12 @@ export default class ThemeCard extends Phaser.GameObjects.Container {
     this._drawBg();
     this.setSize(this.w, this.h);
     this.setInteractive(
-      new Phaser.Geom.Rectangle(-this.w / 2, -this.h / 2, this.w, this.h),
+      new Phaser.Geom.Rectangle(0, 0, this.w, this.h),
       Phaser.Geom.Rectangle.Contains
     );
     this.on('pointerover', () => !this.selected && this._drawBg(0.5));
     this.on('pointerout', () => !this.selected && this._drawBg());
-    this.on('pointerup', () => this.onSelect && this.onSelect(theme.key));
+    this.on('pointerdown', () => this.onSelect && this.onSelect(theme.key));
 
     // 迷你飞船漂浮动画
     scene.tweens.add({ targets: this.playerIcon, y: py + 6, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.inOut' });

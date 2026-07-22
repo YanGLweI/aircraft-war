@@ -2,10 +2,22 @@
 
 export const PLAYER = {
   maxHp: 100,
-  speed: 320,
+  speed: 300, // 基础移动速度（px/s）
+  moveLerp: 0.22, // 键盘速度平滑（越小越缓，避免步幅过大）
+  followLerpMouse: 0.55, // 鼠标跟随平滑（越大越跟手）
+  followLerpTouch: 0.4, // 触摸跟随平滑
+  touchOffsetY: 44, // 仅触摸时抬高机身（鼠标不偏移）
   fireBaseInterval: 260, // ms，等级越高越快
   invulnMsAfterHit: 700, // 受击短暂无敌
   hitboxRadius: 10 // 判定半径小于外观，手感更宽容
+};
+
+// 复活（假付费）：每局最多 3 次；首次需扫码并等 60s，后续点击即可
+export const REVIVE = {
+  maxRevives: 3,
+  firstWaitSec: 60,
+  trollText: '哈哈哈哈哈哈哈真够菜的',
+  graceMs: 2000 // 复活后短暂无敌
 };
 
 // 玩家武器等级：单发 -> 双发 -> 三向 -> 五向 -> 追踪

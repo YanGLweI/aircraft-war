@@ -1,8 +1,9 @@
 // UIScene：覆盖在 GameScene 之上的 HUD。直接读取 GameScene 状态刷新，离散事件用监听。
 import Phaser from 'phaser';
+import QRCode from 'qrcode';
 import { SCENES, EV, DEPTH, GAME_WIDTH as W, GAME_HEIGHT as H } from '../config/gameConfig.js';
 import { getTheme } from '../config/themes/index.js';
-import { MAX_LEVEL } from '../config/balance.js';
+import { MAX_LEVEL, REVIVE } from '../config/balance.js';
 import HealthBar from '../ui/HealthBar.js';
 import Button from '../ui/Button.js';
 import { getBestScore, getSettings, saveSettings } from '../storage/leaderboard.js';
@@ -91,6 +92,7 @@ export default class UIScene extends Phaser.Scene {
       .setAlpha(0);
 
     this._buildPausePanel();
+    this._buildRevivePanel();
     this._bindEvents();
   }
 
@@ -104,6 +106,8 @@ export default class UIScene extends Phaser.Scene {
     this.gs.events.on(EV.BOSS_DEAD, this.onBossDead, this);
     this.gs.events.on(EV.PICKUP, this.onPickup, this);
     this.gs.events.on('pause', this.onPause, this);
+    this.gs.events.on(EV.REVIVE_OFFER, this.onReviveOffer, this);
+    this.gs.events.on(EV.REVIVE_DONE, this.onReviveDone, this);
   }
 
   onBossSpawn({ wave }) {
@@ -188,6 +192,149 @@ export default class UIScene extends Phaser.Scene {
     this.audio.setVolume(this.pVolume);
     this.pVolTxt.setText(`${Math.round(this.pVolume * 100)}`);
     saveSettings({ volume: this.pVolume });
+  }
+
+  // ---------- 付费复活 UI ----------
+  _buildRevivePanel() {
+    this.revivePanel = this.add.container(0, 0).setDepth(DEPTH.HUD + 20).setVisible(false);
+    const dim = this.add.graphics();
+    dim.fillStyle(0x000000, 0.72);
+    dim.fillRect(0, 0, W, H);
+    this.reviveBg = this.add.graphics();
+    this.revivePanel.add([dim, this.reviveBg]);
+    this._reviveItems = [];
+    this._reviveTimer = null;
+  }
+
+  _reviveDrawBg(panelH) {
+    const g = this.reviveBg;
+    g.clear();
+    const x = W / 2 - 150;
+    const y = H / 2 - panelH / 2;
+    g.fillStyle(this.theme.ui.panelColor, 0.97);
+    g.fillRoundedRect(x, y, 300, panelH, 16);
+    g.lineStyle(2, this.theme.ui.panelStroke, 1);
+    g.strokeRoundedRect(x, y, 300, panelH, 16);
+  }
+
+  _clearReviveItems() {
+    if (this._reviveTimer) {
+      this._reviveTimer.remove(false);
+      this._reviveTimer = null;
+    }
+    if (this._reviveItems) this._reviveItems.forEach((it) => it.destroy());
+    this._reviveItems = [];
+  }
+
+  onReviveOffer({ count }) {
+    const font = this.theme.ui.fontFamily;
+    const gs = this.gs;
+    this.pauseBtn.setVisible(false);
+    this._clearReviveItems();
+    this.revivePanel.setVisible(true);
+    if (count === 0) {
+      // 首次：二维码 + 60s 倒计时
+      const panelH = 460;
+      this._reviveDrawBg(panelH);
+      const top = H / 2 - panelH / 2;
+      const qs = 220;
+      const title = this.add.text(W / 2, top + 34, '付费复活', { fontFamily: font, fontSize: '28px', color: '#ffd23d', fontStyle: 'bold' }).setOrigin(0.5);
+      const sub = this.add.text(W / 2, top + 70, '扫码支付即可复活', { fontFamily: font, fontSize: '15px', color: '#cbd5f5' }).setOrigin(0.5);
+      const qrFrame = this.add.graphics();
+      qrFrame.fillStyle(0xffffff, 1);
+      qrFrame.fillRoundedRect(W / 2 - qs / 2 - 8, top + 96, qs + 16, qs + 16, 10);
+      const countdown = this.add.text(W / 2, top + 96 + qs + 40, `剩余 ${REVIVE.firstWaitSec}s`, { fontFamily: font, fontSize: '22px', color: '#49b8ff', fontStyle: 'bold' }).setOrigin(0.5);
+      const give = new Button(this, W / 2, top + panelH - 40, '放弃复活', { width: 220, height: 46, accent: 0xff5a7a, onClick: () => this._onReviveGiveUp() });
+      this.revivePanel.add([title, sub, qrFrame, countdown, give]);
+      this._reviveItems.push(title, sub, qrFrame, countdown, give);
+      this._ensureQrTexture(() => {
+        if (!this.revivePanel.visible) return;
+        const qr = this.add.image(W / 2, top + 96 + (qs + 16) / 2, 'qr_revive').setDisplaySize(qs, qs);
+        this.revivePanel.add(qr);
+        this._reviveItems.push(qr);
+      });
+      this._startReviveCountdown(countdown, REVIVE.firstWaitSec);
+    } else {
+      // 第 2/3 次：又复活？点击即复活
+      const panelH = 260;
+      this._reviveDrawBg(panelH);
+      const top = H / 2 - panelH / 2;
+      const left = REVIVE.maxRevives - count;
+      const title = this.add.text(W / 2, top + 44, '又复活？', { fontFamily: font, fontSize: '30px', color: '#ffd23d', fontStyle: 'bold' }).setOrigin(0.5);
+      const sub = this.add.text(W / 2, top + 84, `剩余复活次数 ${left}`, { fontFamily: font, fontSize: '15px', color: '#cbd5f5' }).setOrigin(0.5);
+      const rev = new Button(this, W / 2, top + 140, '复活', { width: 220, height: 48, accent: 0x36e07a, onClick: () => gs.reviveNow() });
+      const give = new Button(this, W / 2, top + panelH - 40, '放弃复活', { width: 220, height: 46, accent: 0xff5a7a, onClick: () => this._onReviveGiveUp() });
+      this.revivePanel.add([title, sub, rev, give]);
+      this._reviveItems.push(title, sub, rev, give);
+    }
+  }
+
+  _ensureQrTexture(cb) {
+    if (this.textures.exists('qr_revive')) {
+      cb();
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    QRCode.toCanvas(canvas, REVIVE.trollText, { width: 220, margin: 1 }, (err) => {
+      if (err) {
+        console.warn('二维码生成失败', err);
+        return;
+      }
+      this.textures.addCanvas('qr_revive', canvas);
+      cb();
+    });
+  }
+
+  _startReviveCountdown(textObj, sec) {
+    let remain = sec;
+    this._reviveTimer = this.time.addEvent({
+      delay: 1000,
+      repeat: sec - 1,
+      callback: () => {
+        remain -= 1;
+        if (remain > 0) {
+          textObj.setText(`剩余 ${remain}s`);
+        } else {
+          textObj.setText('复活中...');
+          if (this._reviveTimer) {
+            this._reviveTimer.remove(false);
+            this._reviveTimer = null;
+          }
+          this.gs.reviveNow();
+        }
+      }
+    });
+  }
+
+  _onReviveGiveUp() {
+    this._clearReviveItems();
+    this.revivePanel.setVisible(false);
+    this.gs.declineRevive();
+  }
+
+  onReviveDone() {
+    this._clearReviveItems();
+    this._showResumeOverlay();
+  }
+
+  _showResumeOverlay() {
+    const font = this.theme.ui.fontFamily;
+    this.revivePanel.setVisible(true);
+    const panelH = 240;
+    this._reviveDrawBg(panelH);
+    const top = H / 2 - panelH / 2;
+    const title = this.add.text(W / 2, top + 50, '复活成功', { fontFamily: font, fontSize: '30px', color: '#36e07a', fontStyle: 'bold' }).setOrigin(0.5);
+    const sub = this.add.text(W / 2, top + 92, '点击开始继续战斗', { fontFamily: font, fontSize: '15px', color: '#cbd5f5' }).setOrigin(0.5);
+    const start = new Button(this, W / 2, top + 160, '开始', { width: 220, height: 50, accent: 0x36e07a, onClick: () => this._onResumeStart() });
+    this.revivePanel.add([title, sub, start]);
+    this._reviveItems.push(title, sub, start);
+  }
+
+  _onResumeStart() {
+    this._clearReviveItems();
+    this.revivePanel.setVisible(false);
+    this.pauseBtn.setVisible(true);
+    this.gs.resumeAfterRevive();
   }
 
   update() {

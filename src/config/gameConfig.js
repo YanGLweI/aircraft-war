@@ -31,12 +31,14 @@ export const EV = {
   BOSS_DEAD: 'boss-dead',
   PICKUP: 'pickup',
   GAME_OVER: 'game-over',
-  DIFFICULTY: 'difficulty'
+  DIFFICULTY: 'difficulty',
+  REVIVE_OFFER: 'revive-offer',
+  REVIVE_DONE: 'revive-done'
 };
 
 export const DEPTH = {
-  BG: 0,
-  BG_STARS: 1,
+  BG: -2,
+  BG_STARS: -1,
   ENEMY_BULLET: 5,
   ENEMY: 6,
   POWERUP: 7,

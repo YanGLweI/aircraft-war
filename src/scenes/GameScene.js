@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { SCENES, REG, EV, DEPTH, GAME_WIDTH as W, GAME_HEIGHT as H } from '../config/gameConfig.js';
 import { getTheme } from '../config/themes/index.js';
 import { createBackground } from '../config/themes/background.js';
-import { PLAYER, LOOT, BOSS } from '../config/balance.js';
+import { PLAYER, LOOT, BOSS, REVIVE } from '../config/balance.js';
 import Player from '../entities/Player.js';
 import Enemy from '../entities/Enemy.js';
 import Boss from '../entities/Boss.js';
@@ -33,6 +33,9 @@ export default class GameScene extends Phaser.Scene {
     this.isPaused = false;
     this.bossActive = false;
     this.bossWave = 0;
+    this.revivesUsed = 0;
+    this.awaitingRevive = false;
+    this.awaitingResume = false;
 
     this.bgCtrl = createBackground(this, this.theme);
 
@@ -97,13 +100,18 @@ export default class GameScene extends Phaser.Scene {
     if (!p || !p.alive) return;
     const pointer = this.input.activePointer;
     if (pointer && pointer.isDown) {
+      // 鼠标/触摸：位置向指针平滑靠拢（鼠标不偏移且更跟手）
+      const isTouch = pointer.wasTouch;
+      const offY = isTouch ? PLAYER.touchOffsetY : 0;
+      const lerp = isTouch ? PLAYER.followLerpTouch : PLAYER.followLerpMouse;
       const tx = Phaser.Math.Clamp(pointer.worldX, 20, W - 20);
-      const ty = Phaser.Math.Clamp(pointer.worldY - 44, 40, H - 20);
+      const ty = Phaser.Math.Clamp(pointer.worldY - offY, 40, H - 20);
       p.setVelocity(0, 0);
-      p.x = Phaser.Math.Linear(p.x, tx, 0.25);
-      p.y = Phaser.Math.Linear(p.y, ty, 0.25);
+      p.x = Phaser.Math.Linear(p.x, tx, lerp);
+      p.y = Phaser.Math.Linear(p.y, ty, lerp);
       return;
     }
+    // 键盘：目标速度 + 平滑逐帧逐近（含松手减速），避免步幅过大
     let vx = 0;
     let vy = 0;
     if (this.cursors.left.isDown || this.wasd.left.isDown) vx = -1;
@@ -111,7 +119,12 @@ export default class GameScene extends Phaser.Scene {
     if (this.cursors.up.isDown || this.wasd.up.isDown) vy = -1;
     else if (this.cursors.down.isDown || this.wasd.down.isDown) vy = 1;
     const len = Math.hypot(vx, vy) || 1;
-    p.setVelocity((vx / len) * PLAYER.speed, (vy / len) * PLAYER.speed);
+    const targetVx = (vx / len) * PLAYER.speed * (vx || vy ? 1 : 0);
+    const targetVy = (vy / len) * PLAYER.speed * (vx || vy ? 1 : 0);
+    const body = p.body;
+    const nvx = Phaser.Math.Linear(body.velocity.x, targetVx, PLAYER.moveLerp);
+    const nvy = Phaser.Math.Linear(body.velocity.y, targetVy, PLAYER.moveLerp);
+    p.setVelocity(nvx, nvy);
   }
 
   // ---------- 敌方射击 ----------
@@ -258,7 +271,7 @@ export default class GameScene extends Phaser.Scene {
     }
     this.cameras.main.shake(120, 0.006);
     if (this.audio) this.audio.hit();
-    if (died) this.gameOver();
+    if (died) this.onPlayerDeath();
   }
 
   killEnemy(enemy) {
@@ -350,7 +363,7 @@ export default class GameScene extends Phaser.Scene {
 
   // ---------- 暂停 / 结束 ----------
   togglePause() {
-    if (this.isOver) return;
+    if (this.isOver || this.awaitingRevive || this.awaitingResume) return;
     this.isPaused = !this.isPaused;
     if (this.isPaused) {
       this.physics.pause();
@@ -377,8 +390,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   gameOver() {
-    if (this.isOver) return;
-    this.isOver = true;
+    // 兼容旧入口：走死亡流程（可能触发复活）
+    this.onPlayerDeath();
+  }
+
+  // 玩家死亡：优先提供复活，用尽后才真正结束
+  onPlayerDeath() {
+    if (this.isOver || this.awaitingRevive) return;
     this.spawner.setPaused(true);
     if (this.audio) {
       this.audio.stopMusic();
@@ -388,8 +406,24 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.shake(400, 0.014);
     this.player.setVisible(false);
     if (this.player.trail) this.player.trail.stop();
-    this.events.emit(EV.GAME_OVER);
 
+    if (this.revivesUsed < REVIVE.maxRevives) {
+      // 冻结并提供复活
+      this.awaitingRevive = true;
+      this.physics.pause();
+      this.events.emit(EV.REVIVE_OFFER, { count: this.revivesUsed });
+    } else {
+      this._realGameOver();
+    }
+  }
+
+  // 真正结束：切到结算页
+  _realGameOver() {
+    if (this.isOver) return;
+    this.isOver = true;
+    this.awaitingRevive = false;
+    this.spawner.setPaused(true);
+    this.events.emit(EV.GAME_OVER);
     this.time.delayedCall(1200, () => {
       this.scene.stop(SCENES.UI);
       this.scene.start(SCENES.GAMEOVER, {
@@ -400,10 +434,49 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
+  // 确认复活：恢复玩家、清场，随后进入暂停态等待“开始”
+  reviveNow() {
+    if (!this.awaitingRevive) return;
+    this.revivesUsed += 1;
+    this.awaitingRevive = false;
+    const p = this.player;
+    p.alive = true;
+    p.hp = p.maxHp;
+    p.setVisible(true);
+    p.setAlpha(1);
+    p.setPosition(W / 2, H - 120);
+    p.setVelocity(0, 0);
+    p.invulnUntil = this.time.now + REVIVE.graceMs;
+    if (p.trail) p.trail.start();
+    // 清场：普通敌机 + 敌方子弹（保留 Boss）
+    this.enemies.children.each((e) => { if (e.active) e.deactivate(); });
+    this.enemyBullets.children.each((b) => { if (b.active) b.deactivate(); });
+    // 复活后暂停，等待玩家点击“开始”
+    this.isPaused = true;
+    this.awaitingResume = true;
+    this.physics.pause();
+    this.events.emit(EV.REVIVE_DONE);
+  }
+
+  // 复活后点击“开始”继续
+  resumeAfterRevive() {
+    this.awaitingResume = false;
+    this.isPaused = false;
+    this.physics.resume();
+    this.spawner.setPaused(false);
+    if (this.audio) this.audio.startMusic();
+  }
+
+  // 放弃复活：直接结算
+  declineRevive() {
+    this.awaitingRevive = false;
+    this._realGameOver();
+  }
+
   // ---------- 主循环 ----------
   update(time, delta) {
     if (this.bgCtrl) this.bgCtrl.update(delta);
-    if (this.isPaused || this.isOver) return;
+    if (this.isPaused || this.isOver || this.awaitingRevive || this.awaitingResume) return;
 
     this.handleInput();
 

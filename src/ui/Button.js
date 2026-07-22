@@ -32,7 +32,7 @@ export default class Button extends Phaser.GameObjects.Container {
 
     this.setSize(this.w, this.h);
     this.setInteractive(
-      new Phaser.Geom.Rectangle(-this.w / 2, -this.h / 2, this.w, this.h),
+      new Phaser.Geom.Rectangle(0, 0, this.w, this.h),
       Phaser.Geom.Rectangle.Contains
     );
 
@@ -47,7 +47,7 @@ export default class Button extends Phaser.GameObjects.Container {
     this.on('pointerdown', () => {
       scene.tweens.add({ targets: this, scale: 0.96, duration: 80, yoyo: true });
     });
-    if (opts.onClick) this.on('pointerup', opts.onClick);
+    if (opts.onClick) this.on('pointerdown', opts.onClick);
   }
 
   _drawBg(fillAlpha) {
